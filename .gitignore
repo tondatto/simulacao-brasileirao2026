@@ -1,0 +1,39 @@
+# Ambientes e credenciais
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Cache e dados locais
+.cache/
+data/cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Testes e cobertura
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDEs e editores
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
