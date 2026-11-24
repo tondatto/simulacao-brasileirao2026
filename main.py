@@ -11,13 +11,15 @@ from typing import List, Dict, Any
 
 from src.ge_fetcher import fetch_ge_2026_data, fetch_season_history, select_pending_matches
 from src.models import MODEL_REGISTRY, get_model
+from src.relegation_analyzer import analyze_team_relegation, resolve_team_name
 from src.simulator import MonteCarloSimulator
 from src.stats import compute_team_statistics
 from src.terminal_view import (
     print_simulation_header,
     print_standings_table,
     print_highlights,
-    print_detailed_matrix
+    print_detailed_matrix,
+    print_relegation_analysis,
 )
 
 
@@ -60,6 +62,12 @@ def parse_args():
         help="Metodologia estatística para projeção das partidas (padrão: riffel)"
     )
     parser.add_argument(
+        "--analisar-time", "-t",
+        type=str,
+        default=None,
+        help="Analisa um único time na briga contra o rebaixamento (nome ou sigla, ex.: Internacional, GRE)"
+    )
+    parser.add_argument(
         "--incluir-pendentes-r34",
         action="store_true",
         help=argparse.SUPPRESS
@@ -80,6 +88,14 @@ def main():
 
     standings = data["standings"]
 
+    target_team: str = ""
+    if args.analisar_time is not None:
+        try:
+            target_team = resolve_team_name(args.analisar_time, standings)
+        except ValueError as e:
+            print(f"Erro ao selecionar time: {e}", file=sys.stderr)
+            sys.exit(1)
+
     # 2. Seleção dos confrontos pendentes a simular
     matches_to_simulate, rodadas_str = select_pending_matches(data)
     num_matches = len(matches_to_simulate)
@@ -93,6 +109,28 @@ def main():
         history=history,
         fator_zebra=args.zebra,
     )
+    modo_simulacao = "Placares reais (gols)" if model.uses_score_simulation else "Resultado 1X2"
+
+    # Modo específico: análise de permanência (Z-4) para um único clube
+    if target_team:
+        t_sim_start = time.time()
+        analysis = analyze_team_relegation(
+            standings=standings,
+            enriched_matches=enriched_matches,
+            team_name=target_team,
+            num_simulations=args.simulacoes,
+            seed=args.seed,
+        )
+        t_sim_elapsed = time.time() - t_sim_start
+        print_relegation_analysis(
+            analysis=analysis,
+            modelo_desc=model.description,
+            modo_simulacao=modo_simulacao,
+            fator_zebra=args.zebra,
+            rodadas_str=rodadas_str,
+        )
+        print(f"⏱️ Tempo de processamento da análise: {t_sim_elapsed:.2f}s (Total: {time.time()-t0:.2f}s)")
+        return
 
     # 4. Execução da Simulação Monte Carlo
     simulator = MonteCarloSimulator(
@@ -110,7 +148,6 @@ def main():
     stats_list = compute_team_statistics(standings, sim_results)
 
     # 6. Exibição no Terminal
-    modo_simulacao = "Placares reais (gols)" if model.uses_score_simulation else "Resultado 1X2"
     print_simulation_header(
         num_simulations=args.simulacoes,
         num_matches=num_matches,

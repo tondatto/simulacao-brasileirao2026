@@ -146,3 +146,149 @@ def print_detailed_matrix(stats_list: List[Dict[str, Any]]):
 
     print("=" * 112)
     print("Legenda: ' · ' indica probabilidade menor que 0.5% mas matematicamente possível.\n")
+
+
+def _status_label(status: str) -> str:
+    labels = {
+        "ja_salvo": "✅ Já garantido na Série A (0% de risco de rebaixamento)",
+        "depende_so_de_si": "💪 Depende só de si para escapar do Z-4",
+        "depende_de_rivais": "🙏 Não depende só de si (precisa de combinação + tropeços de rivais)",
+        "ja_rebaixado": "❌ Rebaixamento matemático (0% de chance mesmo vencendo todos os jogos)",
+    }
+    return labels.get(status, status)
+
+
+def _eval_combo_label(prob_escapar_pct: float) -> str:
+    if prob_escapar_pct >= 99.95:
+        return "Salvo (100%)"
+    if prob_escapar_pct >= 75.0:
+        return "Alta chance"
+    if prob_escapar_pct >= 50.0:
+        return "Favorável"
+    if prob_escapar_pct >= 15.0:
+        return "Arriscado"
+    if prob_escapar_pct > 0.05:
+        return "Remoto"
+    return "Rebaixado"
+
+
+def print_relegation_analysis(
+    analysis: Dict[str, Any],
+    modelo_desc: str,
+    modo_simulacao: str,
+    fator_zebra: float,
+    rodadas_str: str,
+):
+    team = analysis["team"]
+    nome = team["nome"]
+    sigla = f" ({team['sigla']})" if team.get("sigla") else ""
+
+    print("=" * 112)
+    print(f"      ANÁLISE DE PERMANÊNCIA (BRIGA CONTRA O Z-4) — {nome.upper()}{sigla}")
+    print(f"   Metodologia: {modelo_desc} | Modo: {modo_simulacao}")
+    print("=" * 112)
+    print(
+        f"• Situação Atual: {team['pos_atual']}º lugar | {team['pontos_atuais']} pts | "
+        f"{team['vitorias_atuais']}V | SG {team['saldo_atual']:+d} | "
+        f"{team['jogos_atuais']}J ({team['jogos_restantes']} jogos restantes; máx. {team['max_pontos_possiveis']} pts)\n"
+        f"• Cenário: {rodadas_str} | Amostragem: {analysis['num_simulations']:,} simulações/cenário | Zebra: {fator_zebra*100:.0f}%\n"
+        f"• Probabilidade Base: Escapar {format_pct(analysis['base_survival_pct']).strip()} | "
+        f"Risco Z-4 {format_pct(analysis['base_relegation_pct']).strip()}\n"
+        f"• Diagnóstico: {_status_label(analysis['status'])}"
+    )
+    print("=" * 112)
+
+    # Jogos restantes do time
+    team_matches = analysis["team_matches"]
+    print(f"\n📅 JOGOS RESTANTES DO {nome.upper()}:")
+    if not team_matches:
+        print("   • Nenhum jogo restante na competição.")
+    else:
+        print(f"   {'Rod':<4} {'Mando':<6} {'Adversário':<26} | {'Vitória':>9} {'Empate':>9} {'Derrota':>9}")
+        print("   " + "-" * 78)
+        for m in team_matches:
+            tag = " [Confronto direto]" if m["confronto_direto"] else ""
+            adv_str = f"{m['adversario']} ({m['adversario_pos']}º){tag}"
+            print(
+                f"   R{m['rodada']:<3} {m['mando']:<6} {adv_str:<26} | "
+                f"{format_pct(m['p_vitoria']):>9} {format_pct(m['p_empate']):>9} {format_pct(m['p_derrota']):>9}"
+            )
+
+    # Combinações enumeradas
+    combos = analysis["combinations"]
+    if analysis["enumerated"] and combos:
+        max_show = 27
+        shown_combos = combos[:max_show]
+        omitted = len(combos) - len(shown_combos)
+
+        print(f"\n🎯 COMBINAÇÕES DE RESULTADOS ({len(combos)} cenários possíveis):")
+        print(f"   {'Cenário':<12} {'Resultados':<34} {'Pts':>4} | {'P(Cenário)':>10} {'P(Escapar)':>10}  {'Avaliação'}")
+        print("   " + "-" * 96)
+        for c in shown_combos:
+            print(
+                f"   {c['resumo']:<12} {c['resultados_str']:<34} {c['pontos_finais']:>4} | "
+                f"{format_pct(c['prob_cenario_pct']):>10} {format_pct(c['prob_escapar_pct']):>10}  "
+                f"{_eval_combo_label(c['prob_escapar_pct'])}"
+            )
+        if omitted > 0:
+            zero_omitted = sum(1 for c in combos[max_show:] if c["prob_escapar_pct"] <= 0.05)
+            print(f"   ... ({omitted} combinações menos favoráveis omitidas; {zero_omitted} com ~0.0% de chance)")
+
+    # Meta por pontuação final
+    pts_summary = analysis["points_summary"]
+    if pts_summary:
+        print("\n📊 META POR PONTUAÇÃO FINAL:")
+        print(f"   {'Pts Finais':>10} {'(+Pts)':>7} | {'P(Atingir)':>10} {'P(Escapar)':>11} | {'Combinações'}")
+        print("   " + "-" * 78)
+        for p in pts_summary:
+            gain_str = f"+{p['pontos_ganhos']}"
+            print(
+                f"   {p['pontos_finais']:>10} {gain_str:>7} | "
+                f"{format_pct(p['prob_atingir_pct']):>10} {format_pct(p['prob_escapar_pct']):>11} | "
+                f"{p['exemplos']}"
+            )
+
+    # O que o time deve buscar
+    rec = analysis["recommended_target"]
+    print(f"\n🧭 O QUE O {nome.upper()} DEVE BUSCAR:")
+    if analysis["status"] == "ja_salvo":
+        print("   • O clube já atingiu pontuação segura e não corre risco de rebaixamento.")
+    elif analysis["status"] == "ja_rebaixado":
+        print(
+            f"   • Mesmo atingindo o máximo de {team['max_pontos_possiveis']} pts, "
+            f"não alcança o 16º colocado considerando os confrontos restantes."
+        )
+    else:
+        if rec["safe_points"] is not None:
+            print(f"   • Meta segura (≥99.9%): chegar a {rec['safe_points']} pts.")
+        if rec["easiest_safe_combo"] is not None:
+            c = rec["easiest_safe_combo"]
+            print(f"   • Combinação mais acessível para garantir 100%: {c['resumo']} -> {c['resultados_str']} ({c['pontos_finais']} pts).")
+        elif rec["easiest_likely_combo"] is not None:
+            c = rec["easiest_likely_combo"]
+            print(
+                f"   • Meta realista (≥50% de chance): {rec['likely_points']} pts — ex.: "
+                f"{c['resumo']} ({c['resultados_str']}, {format_pct(c['prob_escapar_pct']).strip()} de escapar)."
+            )
+        elif rec["best_combo"] is not None:
+            c = rec["best_combo"]
+            print(
+                f"   • Melhor cenário possível: {c['resumo']} ({c['resultados_str']}, {c['pontos_finais']} pts) -> "
+                f"{format_pct(c['prob_escapar_pct']).strip()} de chance de escapar (depende de tropeços de rivais)."
+            )
+
+    # Jogos-chave de rivais ("para secar")
+    rivals = analysis["key_rival_matches"]
+    if rivals:
+        print(f"\n👀 JOGOS DE RIVAIS MAIS DECISIVOS (condicionado a: {analysis['rival_conditioned_on']}):")
+        print(f"   {'Rod':<4} {'Confronto':<36} {'Resultado Ideal':<26} {'Impacto':>8} {'Escapa c/ Ideal'}")
+        print("   " + "-" * 96)
+        for rv in rivals:
+            confronto = f"{rv['mandante']} ({rv['mandante_pos']}º) x {rv['visitante']} ({rv['visitante_pos']}º)"
+            impacto_str = f"+{rv['impacto_pp']:.1f} pp"
+            print(
+                f"   R{rv['rodada']:<3} {confronto:<36} {rv['melhor_resultado']:<26} "
+                f"{impacto_str:>8} {format_pct(rv['prob_melhor_pct']):>14}"
+            )
+
+    print("=" * 112)

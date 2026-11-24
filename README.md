@@ -56,6 +56,14 @@ Estão disponíveis 5 metodologias:
 .venv/bin/python main.py --modelo ensemble
 ```
 
+### Analisar um Time na Briga contra o Rebaixamento (`--analisar-time`)
+Avalia todas as combinações de resultados restantes do clube escolhido, a meta de pontuação para escapar do Z-4 e os jogos de rivais mais decisivos ("para secar"):
+```bash
+.venv/bin/python main.py --analisar-time Internacional --modelo dixon-coles
+.venv/bin/python main.py --analisar-time Corinthians --modelo ensemble
+.venv/bin/python main.py --analisar-time GRE
+```
+
 ### Visualizar Matriz Completa de Posições (1º ao 20º)
 ```bash
 python3 main.py --detalhado
@@ -104,6 +112,7 @@ brasileirao2026/
 │   │   └── ensemble.py
 │   ├── ge_fetcher.py      # Extração de dados da Série A 2026, histórico 1..N e API de rodadas
 │   ├── model_riffel.py    # Modelo 50/50 + Vantagem de Mando + Fator Zebra 5%
+│   ├── relegation_analyzer.py # Análise individual de permanência, combinações e jogos de rivais
 │   ├── simulator.py       # Motor Monte Carlo vetorizado em NumPy (1X2 e placares reais)
 │   ├── stats.py           # Agregação de μ ± 1σ, Título, G4, G6, Sula e Z4
 │   └── terminal_view.py   # Renderização formatada e limpa no terminal
@@ -111,6 +120,7 @@ brasileirao2026/
 │   ├── test_ge_fetcher.py # Testes de seleção de jogos pendentes e cache histórico
 │   ├── test_model.py      # Testes do modelo estatístico Riffel
 │   ├── test_models.py     # Testes dos modelos Poisson, Elo, Dixon-Coles e Ensemble
+│   ├── test_relegation_analyzer.py # Testes da análise individual de rebaixamento (Z-4)
 │   └── test_simulator.py  # Testes de convergência, placares reais e desempate CBF
 ├── main.py                # Ponto de entrada CLI
 └── README.md
