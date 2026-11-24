@@ -49,42 +49,72 @@ class MonteCarloSimulator:
 
         # Geração de números aleatórios para todos os jogos em lote
         rand_vals = rng.random((N, num_matches), dtype=np.float32)
-        # Sorteio de margem de gols para vitórias (1, 2 ou 3 gols)
-        rand_margin = rng.choice([1, 2, 3], size=(N, num_matches), p=[0.55, 0.30, 0.15])
+        needs_margin = any(m.get("score_matrix") is None for m in self.matches)
+        # Sorteio de margem de gols para vitórias em modelos 1X2 (1, 2 ou 3 gols)
+        rand_margin = (
+            rng.choice([1, 2, 3], size=(N, num_matches), p=[0.55, 0.30, 0.15])
+            if needs_margin
+            else None
+        )
 
         for k, match in enumerate(self.matches):
             h_idx = self.team_to_idx[match["mandante"]]
             a_idx = self.team_to_idx[match["visitante"]]
-
-            pm = match["p_mandante"]
-            pe = match["p_empate"]
-            t1 = pm
-            t2 = pm + pe
-
             r = rand_vals[:, k]
-            margin = rand_margin[:, k]
 
-            home_win = r < t1
-            draw = (r >= t1) & (r < t2)
-            away_win = r >= t2
+            if match.get("score_matrix") is not None:
+                mat = np.asarray(match["score_matrix"], dtype=np.float64)
+                dim = mat.shape[0]
+                cdf = np.cumsum(mat.ravel())
+                cdf[-1] = 1.0
+                idx = np.minimum(np.searchsorted(cdf, r, side="right"), dim * dim - 1)
+                h_goals = idx // dim
+                a_goals = idx % dim
 
-            # Atualização de Pontos
-            pts[:, h_idx] += home_win * 3 + draw
-            pts[:, a_idx] += away_win * 3 + draw
+                home_win = h_goals > a_goals
+                draw = h_goals == a_goals
+                away_win = a_goals > h_goals
 
-            # Atualização de Vitórias
-            wins[:, h_idx] += home_win
-            wins[:, a_idx] += away_win
+                pts[:, h_idx] += home_win * 3 + draw
+                pts[:, a_idx] += away_win * 3 + draw
 
-            # Atualização de Saldo de Gols e Gols Pró
-            h_margin = home_win * margin
-            a_margin = away_win * margin
+                wins[:, h_idx] += home_win
+                wins[:, a_idx] += away_win
 
-            gd[:, h_idx] += h_margin - a_margin
-            gd[:, a_idx] += a_margin - h_margin
+                gd[:, h_idx] += h_goals - a_goals
+                gd[:, a_idx] += a_goals - h_goals
 
-            gp[:, h_idx] += h_margin + draw  # Estimativa de gols marcados
-            gp[:, a_idx] += a_margin + draw
+                gp[:, h_idx] += h_goals
+                gp[:, a_idx] += a_goals
+            else:
+                pm = match["p_mandante"]
+                pe = match["p_empate"]
+                t1 = pm
+                t2 = pm + pe
+
+                margin = rand_margin[:, k]
+
+                home_win = r < t1
+                draw = (r >= t1) & (r < t2)
+                away_win = r >= t2
+
+                # Atualização de Pontos
+                pts[:, h_idx] += home_win * 3 + draw
+                pts[:, a_idx] += away_win * 3 + draw
+
+                # Atualização de Vitórias
+                wins[:, h_idx] += home_win
+                wins[:, a_idx] += away_win
+
+                # Atualização de Saldo de Gols e Gols Pró
+                h_margin = home_win * margin
+                a_margin = away_win * margin
+
+                gd[:, h_idx] += h_margin - a_margin
+                gd[:, a_idx] += a_margin - h_margin
+
+                gp[:, h_idx] += h_margin + draw  # Estimativa de gols marcados
+                gp[:, a_idx] += a_margin + draw
 
         # Ruído aleatório mínimo para desempate final (sorteio uniforme)
         noise = rng.integers(0, 99, size=(N, self.num_teams), dtype=np.int64)

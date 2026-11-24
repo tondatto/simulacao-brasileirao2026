@@ -22,14 +22,16 @@ def print_simulation_header(
     num_simulations: int,
     num_matches: int,
     rodadas_str: str,
-    fator_zebra: float
+    fator_zebra: float,
+    modelo_desc: str = "Peso Composto 50/50 (Histórico Temporada + Forma Recente nas últimas 5 rodadas)",
+    modo_simulacao: str = "Resultado 1X2",
 ):
     print("=" * 112)
     print("      SIMULAÇÃO MONTE CARLO DO CAMPEONATO BRASILEIRO SÉRIE A — 2026")
-    print("   Metodologia Estatística: Prof. Rogemar Riffel (IF-UFRGS) | Dados: Globo Esporte")
+    print("   Metodologia Estatística: Prof. Rogemar Riffel (IF-UFRGS) / Modelos Plugáveis | Dados: Globo Esporte")
     print("=" * 112)
     print(
-        f"• Modelo: Peso Composto 50/50 (Histórico Temporada + Forma Recente nas últimas 5 rodadas)\n"
+        f"• Modelo: {modelo_desc} | Modo: {modo_simulacao}\n"
         f"• Amostragem: {num_simulations:,} simulações de Monte Carlo | Fator de Zebra: {fator_zebra*100:.0f}%\n"
         f"• Cenário: {num_matches} jogos restantes ({rodadas_str}) | Incerteza indicada: ±1 desvio-padrão (1σ)"
     )

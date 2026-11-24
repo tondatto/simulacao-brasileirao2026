@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from src.ge_fetcher import fetch_ge_2026_data, select_pending_matches
+from src.ge_fetcher import fetch_ge_2026_data, fetch_season_history, select_pending_matches
 
 
 def _make_match(rodada: int, home: str, away: str, finalizado: bool, match_id: int) -> dict:
@@ -212,6 +212,41 @@ class TestGeFetcher(unittest.TestCase):
 
             self.assertEqual(called_rounds, [36, 37, 38, 35, 34])
             self.assertEqual(list(result["rounds"].keys()), ["34", "36", "37", "38"])
+
+    def test_fetch_season_history_incremental_cache_and_ordering(self):
+        data = {
+            "campeonato": "Campeonato Brasileiro 2026",
+            "resource_id": "res-123",
+            "slug_fase": "fase-unica-2026",
+            "rodada_atual": 3,
+            "rounds": {
+                "3": [
+                    _make_match(3, "Time1", "Time2", finalizado=True, match_id=301),
+                    _make_match(3, "Time3", "Time4", finalizado=False, match_id=302),
+                ]
+            },
+        }
+        rounds_api = {
+            1: [_make_match(1, "Time1", "Time3", finalizado=True, match_id=101)],
+            2: [_make_match(2, "Time2", "Time4", finalizado=True, match_id=201)],
+        }
+        calls = []
+
+        def fake_fetch_round(resource_id, slug_fase, rodada):
+            calls.append(rodada)
+            return rounds_api[rodada]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.ge_fetcher._fetch_round_matches", side_effect=fake_fetch_round):
+                hist1 = fetch_season_history(data, force_refresh=False, cache_dir=tmpdir)
+                self.assertEqual(calls, [1, 2])
+                self.assertEqual([m["id_jogo"] for m in hist1], [101, 201, 301])
+
+                # Segunda chamada sem force_refresh deve reutilizar rodadas 1 e 2 já finalizadas
+                calls.clear()
+                hist2 = fetch_season_history(data, force_refresh=False, cache_dir=tmpdir)
+                self.assertEqual(calls, [])
+                self.assertEqual([m["id_jogo"] for m in hist2], [101, 201, 301])
 
 
 if __name__ == "__main__":

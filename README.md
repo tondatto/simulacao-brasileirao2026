@@ -28,12 +28,32 @@ O simulador replica os princípios descritos no projeto da UFRGS:
 ## 🚀 Como Executar
 
 ### Pré-requisitos
-- Python 3.9+ com `numpy` instalado no ambiente.
-- Não requer instalação global de nenhum pacote npm nem bibliotecas adicionais.
+- Python 3.9+ com `numpy` e `scipy`.
+
+Configuração recomendada com ambiente virtual:
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
 
 ### Execução Padrão (1.000.000 de Simulações)
 ```bash
-python3 main.py
+.venv/bin/python main.py
+```
+
+### Escolher Metodologia de Projeção (`--modelo`)
+Estão disponíveis 5 metodologias:
+- `riffel` *(padrão)*: Peso composto 50/50 (Histórico + Forma Recente) + mando + zebra.
+- `poisson`: Poisson Ataque/Defesa com correção de placares baixos e simulação de placares reais.
+- `elo`: Rating Elo Dinâmico com margem de gols (busca cache incremental das rodadas `1..atual`).
+- `dixon-coles`: Dixon-Coles MLE (SciPy `L-BFGS-B`) com decaimento temporal e simulação de placares reais.
+- `ensemble`: Combinação ponderada de `riffel`, `poisson`, `elo` e `dixon-coles`.
+
+```bash
+.venv/bin/python main.py --modelo poisson
+.venv/bin/python main.py --modelo elo
+.venv/bin/python main.py --modelo dixon-coles
+.venv/bin/python main.py --modelo ensemble
 ```
 
 ### Visualizar Matriz Completa de Posições (1º ao 20º)
@@ -72,15 +92,26 @@ python3 -m unittest discover tests
 brasileirao2026/
 ├── .cache/                # Cache local dos dados do GE (ignorado pelo git)
 ├── .gitignore
+├── requirements.txt       # Dependências Python (numpy, scipy)
 ├── src/
-│   ├── ge_fetcher.py      # Extração de dados da Série A 2026 e API de rodadas
+│   ├── models/            # Metodologias plugáveis (riffel, poisson, elo, dixon-coles, ensemble)
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── riffel.py
+│   │   ├── poisson.py
+│   │   ├── elo.py
+│   │   ├── dixon_coles.py
+│   │   └── ensemble.py
+│   ├── ge_fetcher.py      # Extração de dados da Série A 2026, histórico 1..N e API de rodadas
 │   ├── model_riffel.py    # Modelo 50/50 + Vantagem de Mando + Fator Zebra 5%
-│   ├── simulator.py       # Motor Monte Carlo vetorizado em NumPy (1M iterações)
+│   ├── simulator.py       # Motor Monte Carlo vetorizado em NumPy (1X2 e placares reais)
 │   ├── stats.py           # Agregação de μ ± 1σ, Título, G4, G6, Sula e Z4
 │   └── terminal_view.py   # Renderização formatada e limpa no terminal
 ├── tests/
-│   ├── test_model.py      # Testes do modelo estatístico
-│   └── test_simulator.py  # Testes de convergência e desempate CBF
+│   ├── test_ge_fetcher.py # Testes de seleção de jogos pendentes e cache histórico
+│   ├── test_model.py      # Testes do modelo estatístico Riffel
+│   ├── test_models.py     # Testes dos modelos Poisson, Elo, Dixon-Coles e Ensemble
+│   └── test_simulator.py  # Testes de convergência, placares reais e desempate CBF
 ├── main.py                # Ponto de entrada CLI
 └── README.md
 ```

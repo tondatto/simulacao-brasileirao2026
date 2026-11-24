@@ -119,6 +119,12 @@ def _format_rounds_label(
     return " + ".join(parts)
 
 
+def _match_key(match: Dict[str, Any]) -> Tuple[Any, ...]:
+    if match.get("id_jogo") is not None:
+        return ("id", match["id_jogo"])
+    return ("tuple", match.get("rodada"), match.get("mandante"), match.get("visitante"))
+
+
 def select_pending_matches(data: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
     """
     Seleciona apenas os confrontos ainda não finalizados a partir dos dados em cache/API,
@@ -127,11 +133,6 @@ def select_pending_matches(data: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], 
     rounds_data = data.get("rounds", {})
     pending_matches: List[Dict[str, Any]] = []
     seen_keys = set()
-
-    def _match_key(match: Dict[str, Any]) -> Tuple[Any, ...]:
-        if match.get("id_jogo") is not None:
-            return ("id", match["id_jogo"])
-        return ("tuple", match.get("rodada"), match.get("mandante"), match.get("visitante"))
 
     for _, round_matches in sorted(rounds_data.items(), key=lambda kv: int(kv[0])):
         for m in round_matches:
@@ -151,6 +152,82 @@ def select_pending_matches(data: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], 
 
     pending_matches.sort(key=lambda m: int(m.get("rodada") or 0))
     return pending_matches, _format_rounds_label(pending_matches, rounds_data)
+
+
+def fetch_season_history(
+    data: Dict[str, Any],
+    force_refresh: bool = False,
+    cache_dir: str = ".cache",
+) -> List[Dict[str, Any]]:
+    """
+    Carrega e armazena em cache incremental os jogos finalizados das rodadas 1..rodada_atual.
+    Rodadas passadas já 100% finalizadas em cache são reutilizadas sem novas requisições HTTP.
+    """
+    os.makedirs(cache_dir, exist_ok=True)
+    history_path = os.path.join(cache_dir, "ge_2026_history.json")
+
+    resource_id = data.get("resource_id") or DEFAULT_RESOURCE_ID
+    slug_fase = data.get("slug_fase") or "fase-unica-campeonato-brasileiro-2026"
+    rodada_atual = int(data.get("rodada_atual") or 1)
+    existing_rounds = data.get("rounds", {})
+
+    cached_rounds: Dict[str, List[Dict[str, Any]]] = {}
+    if not force_refresh and os.path.exists(history_path):
+        try:
+            with open(history_path, "r", encoding="utf-8") as f:
+                cached_payload = json.load(f)
+            if (
+                cached_payload.get("resource_id") == resource_id
+                and cached_payload.get("slug_fase") == slug_fase
+            ):
+                cached_rounds = cached_payload.get("rounds", {})
+        except Exception:
+            cached_rounds = {}
+
+    history_rounds: Dict[str, List[Dict[str, Any]]] = {}
+    for r in range(1, rodada_atual + 1):
+        r_key = str(r)
+        if r_key in existing_rounds:
+            history_rounds[r_key] = existing_rounds[r_key]
+            continue
+
+        cached_r = cached_rounds.get(r_key)
+        if not force_refresh and cached_r and all(_is_match_finished(m) for m in cached_r):
+            history_rounds[r_key] = cached_r
+            continue
+
+        history_rounds[r_key] = _fetch_round_matches(resource_id, slug_fase, r)
+
+    history_rounds = {str(r): history_rounds[str(r)] for r in sorted(int(k) for k in history_rounds)}
+
+    history_payload = {
+        "campeonato": data.get("campeonato", "Campeonato Brasileiro 2026"),
+        "resource_id": resource_id,
+        "slug_fase": slug_fase,
+        "rodada_atual": rodada_atual,
+        "rounds": history_rounds,
+    }
+    with open(history_path, "w", encoding="utf-8") as f:
+        json.dump(history_payload, f, ensure_ascii=False, indent=2)
+
+    finished_matches: List[Dict[str, Any]] = []
+    seen_keys = set()
+    for _, round_matches in sorted(history_rounds.items(), key=lambda kv: int(kv[0])):
+        for m in round_matches:
+            if _is_match_finished(m):
+                key = _match_key(m)
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    finished_matches.append(m)
+
+    finished_matches.sort(
+        key=lambda m: (
+            int(m.get("rodada") or 0),
+            m.get("data_realizacao") or "",
+            int(m.get("id_jogo") or 0),
+        )
+    )
+    return finished_matches
 
 
 def fetch_ge_2026_data(force_refresh: bool = False, cache_dir: str = ".cache") -> Dict[str, Any]:

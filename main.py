@@ -9,8 +9,8 @@ import sys
 import time
 from typing import List, Dict, Any
 
-from src.ge_fetcher import fetch_ge_2026_data, select_pending_matches
-from src.model_riffel import calculate_team_strengths, prepare_matches_with_probabilities
+from src.ge_fetcher import fetch_ge_2026_data, fetch_season_history, select_pending_matches
+from src.models import MODEL_REGISTRY, get_model
 from src.simulator import MonteCarloSimulator
 from src.stats import compute_team_statistics
 from src.terminal_view import (
@@ -54,6 +54,12 @@ def parse_args():
         help="Forçar atualização dos dados diretamente do Globo Esporte ignorando o cache local"
     )
     parser.add_argument(
+        "--modelo", "-m",
+        choices=list(MODEL_REGISTRY.keys()),
+        default="riffel",
+        help="Metodologia estatística para projeção das partidas (padrão: riffel)"
+    )
+    parser.add_argument(
         "--incluir-pendentes-r34",
         action="store_true",
         help=argparse.SUPPRESS
@@ -78,10 +84,14 @@ def main():
     matches_to_simulate, rodadas_str = select_pending_matches(data)
     num_matches = len(matches_to_simulate)
 
-    # 3. Cálculo das forças (50% histórico + 50% últimos 5 jogos) e probabilidades com fator de zebra
-    strengths = calculate_team_strengths(standings)
-    enriched_matches = prepare_matches_with_probabilities(
-        matches_to_simulate, strengths, fator_zebra=args.zebra
+    # 3. Carga do modelo e cálculo de probabilidades / matrizes de placares
+    model = get_model(args.modelo)
+    history = fetch_season_history(data, force_refresh=args.refresh) if model.requires_history else None
+    enriched_matches = model.prepare_matches(
+        standings,
+        matches_to_simulate,
+        history=history,
+        fator_zebra=args.zebra,
     )
 
     # 4. Execução da Simulação Monte Carlo
@@ -100,11 +110,14 @@ def main():
     stats_list = compute_team_statistics(standings, sim_results)
 
     # 6. Exibição no Terminal
+    modo_simulacao = "Placares reais (gols)" if model.uses_score_simulation else "Resultado 1X2"
     print_simulation_header(
         num_simulations=args.simulacoes,
         num_matches=num_matches,
         rodadas_str=rodadas_str,
-        fator_zebra=args.zebra
+        fator_zebra=args.zebra,
+        modelo_desc=model.description,
+        modo_simulacao=modo_simulacao,
     )
     print_standings_table(stats_list)
     print_highlights(stats_list)
