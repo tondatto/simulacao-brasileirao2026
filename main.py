@@ -9,7 +9,7 @@ import sys
 import time
 from typing import List, Dict, Any
 
-from src.ge_fetcher import fetch_ge_2026_data
+from src.ge_fetcher import fetch_ge_2026_data, select_pending_matches
 from src.model_riffel import calculate_team_strengths, prepare_matches_with_probabilities
 from src.simulator import MonteCarloSimulator
 from src.stats import compute_team_statistics
@@ -56,7 +56,7 @@ def parse_args():
     parser.add_argument(
         "--incluir-pendentes-r34",
         action="store_true",
-        help="Incluir também os jogos ainda não finalizados da rodada 34 na simulação"
+        help=argparse.SUPPRESS
     )
     return parser.parse_args()
 
@@ -74,21 +74,8 @@ def main():
 
     standings = data["standings"]
 
-    # 2. Seleção dos confrontos restantes a simular
-    matches_to_simulate: List[Dict[str, Any]] = []
-
-    # Se solicitado, inclui os jogos pendentes da rodada 34
-    if args.incluir_pendentes_r34 and data.get("pending_r34"):
-        matches_to_simulate.extend(data["pending_r34"])
-        rodadas_str = f"Rodada 34 pendentes + Rodadas 35 a {data['rodada_final']}"
-    else:
-        rodadas_str = f"Rodadas 35 a {data['rodada_final']}"
-
-    # Adiciona todos os jogos das rodadas 35 até o final
-    for r in range(35, data["rodada_final"] + 1):
-        round_matches = data.get("rounds", {}).get(str(r), [])
-        matches_to_simulate.extend(round_matches)
-
+    # 2. Seleção dos confrontos pendentes a simular
+    matches_to_simulate, rodadas_str = select_pending_matches(data)
     num_matches = len(matches_to_simulate)
 
     # 3. Cálculo das forças (50% histórico + 50% últimos 5 jogos) e probabilidades com fator de zebra

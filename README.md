@@ -9,7 +9,7 @@ Simulador probabilístico das rodadas finais do Campeonato Brasileiro Série A 2
 O simulador replica os princípios descritos no projeto da UFRGS:
 
 1. **Peso Composto (50/50)**:
-   - **50% Desempenho Histórico**: Aproveitamento geral de pontos de cada clube na temporada até a 34ª rodada.
+   - **50% Desempenho Histórico**: Aproveitamento geral de pontos de cada clube na temporada até a rodada atual.
    - **50% Desempenho Recente**: Aproveitamento nas últimas 5 partidas disputadas (`ultimos_jogos`), capturando a fase e o momento anímico de cada equipe.
 2. **Vantagem de Mando e Probabilidade de Empate**:
    - Incorpora o fator casa histórico do futebol brasileiro.
@@ -52,10 +52,8 @@ python3 main.py --simulacoes 500000 --zebra 0.08
 python3 main.py --refresh
 ```
 
-### Incluir Jogos Pendentes da Rodada 34
-```bash
-python3 main.py --incluir-pendentes-r34
-```
+### Jogos Pendentes e Adiamentos
+Jogos ainda não finalizados da rodada atual e eventuais partidas adiadas de rodadas anteriores são detectados e incluídos automaticamente na simulação.
 
 ---
 
@@ -178,7 +176,4 @@ Remo             |                                                          ·  
 Chapecoense      |                                                                          1% 99%
 ================================================================================================================
 Legenda: ' · ' indica probabilidade menor que 0.5% mas matematicamente possível.
-```
-
-```
 ```

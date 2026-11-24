@@ -8,7 +8,7 @@ import json
 import os
 import re
 import urllib.request
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Tuple
 
 GE_SERIE_A_URL = "https://ge.globo.com/futebol/brasileirao-serie-a/"
 DEFAULT_RESOURCE_ID = "d1a37fa4-e948-43a6-ba53-ab24ab3a45b1"
@@ -64,6 +64,95 @@ def _fetch_round_matches(resource_id: str, slug_fase: str, rodada: int) -> List[
     return matches
 
 
+def _is_match_finished(match: Dict[str, Any]) -> bool:
+    if "finalizado" in match:
+        return bool(match["finalizado"])
+    return match.get("placar_mandante") is not None and match.get("placar_visitante") is not None
+
+
+def _format_rounds_label(
+    matches_to_simulate: List[Dict[str, Any]],
+    rounds_data: Dict[str, List[Dict[str, Any]]]
+) -> str:
+    if not matches_to_simulate:
+        return "Campeonato encerrado"
+
+    pending_by_round: Dict[int, int] = {}
+    for m in matches_to_simulate:
+        r = int(m.get("rodada") or 0)
+        pending_by_round[r] = pending_by_round.get(r, 0) + 1
+
+    parts: List[str] = []
+    range_start = None
+    range_end = None
+
+    def _flush_range() -> None:
+        nonlocal range_start, range_end
+        if range_start is None:
+            return
+        if range_start == range_end:
+            parts.append(f"Rodada {range_start}")
+        else:
+            parts.append(f"Rodadas {range_start} a {range_end}")
+        range_start = None
+        range_end = None
+
+    for r in sorted(pending_by_round):
+        pending_count = pending_by_round[r]
+        total_in_round = len(rounds_data.get(str(r), []))
+        if total_in_round > 0 and pending_count < total_in_round:
+            _flush_range()
+            sufixo = "pendente" if pending_count == 1 else "pendentes"
+            parts.append(f"Rodada {r} ({pending_count} {sufixo})")
+        else:
+            if range_start is None:
+                range_start = r
+                range_end = r
+            elif r == range_end + 1:
+                range_end = r
+            else:
+                _flush_range()
+                range_start = r
+                range_end = r
+
+    _flush_range()
+    return " + ".join(parts)
+
+
+def select_pending_matches(data: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Seleciona apenas os confrontos ainda não finalizados a partir dos dados em cache/API,
+    ordenados por rodada e sem duplicações (incluindo compatibilidade com caches legados).
+    """
+    rounds_data = data.get("rounds", {})
+    pending_matches: List[Dict[str, Any]] = []
+    seen_keys = set()
+
+    def _match_key(match: Dict[str, Any]) -> Tuple[Any, ...]:
+        if match.get("id_jogo") is not None:
+            return ("id", match["id_jogo"])
+        return ("tuple", match.get("rodada"), match.get("mandante"), match.get("visitante"))
+
+    for _, round_matches in sorted(rounds_data.items(), key=lambda kv: int(kv[0])):
+        for m in round_matches:
+            if not _is_match_finished(m):
+                key = _match_key(m)
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    pending_matches.append(m)
+
+    # Compatibilidade com caches antigos que armazenavam jogos adiados em pending_r34
+    for m in data.get("pending_r34", []):
+        if not _is_match_finished(m):
+            key = _match_key(m)
+            if key not in seen_keys:
+                seen_keys.add(key)
+                pending_matches.append(m)
+
+    pending_matches.sort(key=lambda m: int(m.get("rodada") or 0))
+    return pending_matches, _format_rounds_label(pending_matches, rounds_data)
+
+
 def fetch_ge_2026_data(force_refresh: bool = False, cache_dir: str = ".cache") -> Dict[str, Any]:
     """
     Busca os dados oficiais do Brasileirão 2026 da classificação atual e das rodadas restantes.
@@ -86,7 +175,7 @@ def fetch_ge_2026_data(force_refresh: bool = False, cache_dir: str = ".cache") -
     resource_id = _extract_resource_id(html)
     slug_fase = raw_data.get("fase", {}).get("slug", "fase-unica-campeonato-brasileiro-2026")
     rodada_meta = raw_data.get("rodada", {})
-    rodada_atual = rodada_meta.get("atual", 34)
+    rodada_atual = rodada_meta.get("atual", 1)
     rodada_final = rodada_meta.get("ultima", 38)
 
     # 2. Processa os 20 clubes da classificação
@@ -114,17 +203,35 @@ def fetch_ge_2026_data(force_refresh: bool = False, cache_dir: str = ".cache") -
     for i, t in enumerate(standings, start=1):
         t["posicao"] = i
 
-    # 3. Busca os jogos das rodadas restantes (35 a 38)
-    rounds_data = {}
-    for r in range(35, rodada_final + 1):
+    # 3. Busca os jogos da rodada atual até a rodada final
+    rounds_data: Dict[str, List[Dict[str, Any]]] = {}
+    for r in range(rodada_atual, rodada_final + 1):
         rounds_data[str(r)] = _fetch_round_matches(resource_id, slug_fase, r)
 
-    # 4. Verifica jogos pendentes da rodada 34
-    pending_r34 = []
-    r34_matches = _fetch_round_matches(resource_id, slug_fase, 34)
-    for m in r34_matches:
-        if not m["finalizado"]:
-            pending_r34.append(m)
+    # 4. Detecta automaticamente jogos adiados de rodadas anteriores (< rodada_atual)
+    pending_by_team: Dict[str, int] = {}
+    for round_matches in rounds_data.values():
+        for m in round_matches:
+            if not _is_match_finished(m):
+                pending_by_team[m["mandante"]] = pending_by_team.get(m["mandante"], 0) + 1
+                pending_by_team[m["visitante"]] = pending_by_team.get(m["visitante"], 0) + 1
+
+    def _all_teams_complete() -> bool:
+        return all(t["jogos"] + pending_by_team.get(t["nome"], 0) >= rodada_final for t in standings)
+
+    if not _all_teams_complete():
+        for r in range(rodada_atual - 1, 0, -1):
+            r_matches = _fetch_round_matches(resource_id, slug_fase, r)
+            pending_in_r = [m for m in r_matches if not _is_match_finished(m)]
+            if pending_in_r:
+                rounds_data[str(r)] = r_matches
+                for m in pending_in_r:
+                    pending_by_team[m["mandante"]] = pending_by_team.get(m["mandante"], 0) + 1
+                    pending_by_team[m["visitante"]] = pending_by_team.get(m["visitante"], 0) + 1
+            if _all_teams_complete():
+                break
+
+    rounds_data = {str(r): rounds_data[str(r)] for r in sorted(int(k) for k in rounds_data)}
 
     payload = {
         "campeonato": "Campeonato Brasileiro 2026",
@@ -135,7 +242,6 @@ def fetch_ge_2026_data(force_refresh: bool = False, cache_dir: str = ".cache") -
         "slug_fase": slug_fase,
         "standings": standings,
         "rounds": rounds_data,
-        "pending_r34": pending_r34
     }
 
     with open(cache_path, "w", encoding="utf-8") as f:
@@ -146,8 +252,10 @@ def fetch_ge_2026_data(force_refresh: bool = False, cache_dir: str = ".cache") -
 
 if __name__ == "__main__":
     data = fetch_ge_2026_data(force_refresh=True)
-    print(f"Carregado: {data['campeonato']}")
+    pending_matches, rodadas_label = select_pending_matches(data)
+    print(f"Carregado: {data['campeonato']} (Rodada atual: {data['rodada_atual']})")
     print(f"Total de clubes: {len(data['standings'])}")
-    print(f"Jogos pendentes rodada 34: {len(data['pending_r34'])}")
+    print(f"Total de jogos pendentes: {len(pending_matches)} ({rodadas_label})")
     for r, matches in data["rounds"].items():
-        print(f"Rodada {r}: {len(matches)} jogos")
+        pendentes = sum(1 for m in matches if not _is_match_finished(m))
+        print(f"Rodada {r}: {len(matches)} jogos ({pendentes} pendentes)")
